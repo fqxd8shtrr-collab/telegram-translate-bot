@@ -109,7 +109,7 @@ async def handler(event):
             return
 
         # 🔥 تأخير بسيط حتى يظهر المنشور أولاً
-        await asyncio.sleep(2)
+        await asyncio.sleep(0)
 
         await send_translation(msg.id, text)
 
