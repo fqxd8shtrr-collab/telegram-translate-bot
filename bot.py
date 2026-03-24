@@ -7,7 +7,7 @@ from telethon import TelegramClient, events, functions
 
 api_id = int(os.environ["api_id"])
 api_hash = os.environ["api_hash"]
-bot_token = os.environ["bot_token"]
+phone = os.environ["phone"]
 source_channel = os.environ["source_channel"]
 
 target_language = "en"
@@ -18,10 +18,9 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
-client = TelegramClient("translation_bot_session", api_id, api_hash)
+client = TelegramClient("translation_user_session", api_id, api_hash)
 translator = GoogleTranslator(source="auto", target=target_language)
 
-# نخزن رسائل الترجمة لكل منشور حتى نقدر نعدلها لاحقًا
 translation_map = {}
 
 
@@ -47,10 +46,6 @@ def translate_text(text: str) -> str:
 
 
 async def get_discussion_thread(post_id: int):
-    """
-    يجلب رسالة المنشور داخل مجموعة النقاش المرتبطة بالقناة
-    حتى نرد عليها داخل نفس المناقشة
-    """
     result = await client(
         functions.messages.GetDiscussionMessageRequest(
             peer=source_channel,
@@ -58,12 +53,8 @@ async def get_discussion_thread(post_id: int):
         )
     )
 
-    if not result.messages:
-        raise RuntimeError("Discussion message not found for this post.")
-
     discussion_message = result.messages[0]
     discussion_entity = await client.get_input_entity(discussion_message.peer_id)
-
     return discussion_entity, discussion_message.id
 
 
@@ -101,7 +92,6 @@ async def update_existing_translation(post_id: int, final_text: str):
 
     common_count = min(len(old_ids), len(new_parts))
 
-    # تعديل الرسائل الموجودة
     for i in range(common_count):
         await client.edit_message(
             entity=discussion_entity,
@@ -110,7 +100,6 @@ async def update_existing_translation(post_id: int, final_text: str):
         )
         new_ids.append(old_ids[i])
 
-    # إذا النص الجديد أطول، أرسل أجزاء إضافية
     for i in range(common_count, len(new_parts)):
         sent = await client.send_message(
             entity=discussion_entity,
@@ -119,7 +108,6 @@ async def update_existing_translation(post_id: int, final_text: str):
         )
         new_ids.append(sent.id)
 
-    # إذا النص الجديد أقصر، احذف الرسائل الزائدة القديمة
     if len(old_ids) > len(new_parts):
         extra_ids = old_ids[len(new_parts):]
         await client.delete_messages(discussion_entity, extra_ids)
@@ -128,7 +116,7 @@ async def update_existing_translation(post_id: int, final_text: str):
 
 
 @client.on(events.NewMessage(chats=source_channel))
-async def handle_new_post(event) -> None:
+async def handle_new_post(event):
     try:
         message = event.message
         original_text = clean_text(message.message)
@@ -142,15 +130,14 @@ async def handle_new_post(event) -> None:
         final_text = f"{translation_header}\n\n{translated_text}"
 
         await send_new_translation(message.id, final_text)
-
-        logging.info("Translation sent successfully in post discussion.")
+        logging.info("Translation sent successfully.")
 
     except Exception as e:
         logging.error(f"Error while handling new post: {e}")
 
 
 @client.on(events.MessageEdited(chats=source_channel))
-async def handle_edited_post(event) -> None:
+async def handle_edited_post(event):
     try:
         message = event.message
         original_text = clean_text(message.message)
@@ -164,16 +151,15 @@ async def handle_edited_post(event) -> None:
         final_text = f"{translation_header}\n\n{translated_text}"
 
         await update_existing_translation(message.id, final_text)
-
         logging.info("Translation updated successfully.")
 
     except Exception as e:
         logging.error(f"Error while handling edited post: {e}")
 
 
-async def main() -> None:
-    await client.start(bot_token=bot_token)
-    logging.info("Bot is running...")
+async def main():
+    await client.start(phone=phone)
+    logging.info("Userbot is running...")
     await client.run_until_disconnected()
 
 
