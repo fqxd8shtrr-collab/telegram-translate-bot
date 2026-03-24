@@ -9,7 +9,6 @@ api_id = int(os.environ["api_id"])
 api_hash = os.environ["api_hash"]
 bot_token = os.environ["bot_token"]
 source_channel = os.environ["source_channel"]
-discussion_group_id = int(os.environ["discussion_group_id"])
 
 target_language = "en"
 translation_header = "English translation:"
@@ -60,11 +59,12 @@ async def handle_new_post(event) -> None:
 
         for part in split_text(final_text):
             await client.send_message(
-                entity=discussion_group_id,
+                entity=source_channel,
                 message=part,
+                comment_to=message.id,
             )
 
-        logging.info("Translation sent successfully.")
+        logging.info("Translation sent successfully in post discussion.")
 
     except Exception as e:
         logging.error(f"Error while handling post: {e}")
