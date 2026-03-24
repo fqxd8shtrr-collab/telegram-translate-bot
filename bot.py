@@ -3,12 +3,13 @@ import logging
 import os
 
 from deep_translator import GoogleTranslator
-from telethon import TelegramClient, events, functions
+from telethon import TelegramClient, events
 
 api_id = int(os.environ["api_id"])
 api_hash = os.environ["api_hash"]
-phone = os.environ["phone"]
+bot_token = os.environ["bot_token"]
 source_channel = os.environ["source_channel"]
+discussion_group_id = int(os.environ["discussion_group_id"])
 
 target_language = "en"
 translation_header = "English translation:"
@@ -18,9 +19,10 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
-client = TelegramClient("translation_user_session", api_id, api_hash)
+client = TelegramClient("translation_bot_session", api_id, api_hash)
 translator = GoogleTranslator(source="auto", target=target_language)
 
+# حفظ رسائل الترجمة حتى نعدلها عند تعديل المنشور
 translation_map = {}
 
 
@@ -45,56 +47,34 @@ def translate_text(text: str) -> str:
     return translator.translate(text)
 
 
-async def get_discussion_thread(post_id: int):
-    result = await client(
-        functions.messages.GetDiscussionMessageRequest(
-            peer=source_channel,
-            msg_id=post_id,
-        )
-    )
-
-    discussion_message = result.messages[0]
-    discussion_entity = await client.get_input_entity(discussion_message.peer_id)
-    return discussion_entity, discussion_message.id
-
-
-async def send_new_translation(post_id: int, final_text: str):
-    discussion_entity, thread_message_id = await get_discussion_thread(post_id)
-
+async def send_translation(post_id: int, final_text: str) -> None:
     sent_ids = []
+
     for part in split_text(final_text):
         sent = await client.send_message(
-            entity=discussion_entity,
+            entity=discussion_group_id,
             message=part,
-            reply_to=thread_message_id,
         )
         sent_ids.append(sent.id)
 
-    translation_map[post_id] = {
-        "entity": discussion_entity,
-        "thread_message_id": thread_message_id,
-        "message_ids": sent_ids,
-    }
+    translation_map[post_id] = sent_ids
 
 
-async def update_existing_translation(post_id: int, final_text: str):
+async def update_translation(post_id: int, final_text: str) -> None:
+    new_parts = split_text(final_text)
+
     if post_id not in translation_map:
-        await send_new_translation(post_id, final_text)
+        await send_translation(post_id, final_text)
         return
 
-    saved = translation_map[post_id]
-    discussion_entity = saved["entity"]
-    thread_message_id = saved["thread_message_id"]
-    old_ids = saved["message_ids"]
-
-    new_parts = split_text(final_text)
+    old_ids = translation_map[post_id]
     new_ids = []
 
     common_count = min(len(old_ids), len(new_parts))
 
     for i in range(common_count):
         await client.edit_message(
-            entity=discussion_entity,
+            entity=discussion_group_id,
             message=old_ids[i],
             text=new_parts[i],
         )
@@ -102,21 +82,20 @@ async def update_existing_translation(post_id: int, final_text: str):
 
     for i in range(common_count, len(new_parts)):
         sent = await client.send_message(
-            entity=discussion_entity,
+            entity=discussion_group_id,
             message=new_parts[i],
-            reply_to=thread_message_id,
         )
         new_ids.append(sent.id)
 
     if len(old_ids) > len(new_parts):
         extra_ids = old_ids[len(new_parts):]
-        await client.delete_messages(discussion_entity, extra_ids)
+        await client.delete_messages(discussion_group_id, extra_ids)
 
-    translation_map[post_id]["message_ids"] = new_ids
+    translation_map[post_id] = new_ids
 
 
 @client.on(events.NewMessage(chats=source_channel))
-async def handle_new_post(event):
+async def handle_new_post(event) -> None:
     try:
         message = event.message
         original_text = clean_text(message.message)
@@ -129,7 +108,7 @@ async def handle_new_post(event):
         translated_text = translate_text(original_text)
         final_text = f"{translation_header}\n\n{translated_text}"
 
-        await send_new_translation(message.id, final_text)
+        await send_translation(message.id, final_text)
         logging.info("Translation sent successfully.")
 
     except Exception as e:
@@ -137,7 +116,7 @@ async def handle_new_post(event):
 
 
 @client.on(events.MessageEdited(chats=source_channel))
-async def handle_edited_post(event):
+async def handle_edited_post(event) -> None:
     try:
         message = event.message
         original_text = clean_text(message.message)
@@ -150,16 +129,16 @@ async def handle_edited_post(event):
         translated_text = translate_text(original_text)
         final_text = f"{translation_header}\n\n{translated_text}"
 
-        await update_existing_translation(message.id, final_text)
+        await update_translation(message.id, final_text)
         logging.info("Translation updated successfully.")
 
     except Exception as e:
         logging.error(f"Error while handling edited post: {e}")
 
 
-async def main():
-    await client.start(phone=phone)
-    logging.info("Userbot is running...")
+async def main() -> None:
+    await client.start(bot_token=bot_token)
+    logging.info("Bot is running...")
     await client.run_until_disconnected()
 
 
